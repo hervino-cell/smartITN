@@ -44,6 +44,7 @@ public class DashboardActivity extends AppCompatActivity {
     public static final String EXTRA_STUDENT_ID = "student_id";
 
     // ── Card View ──────────────────────────────────────────────────────────
+    private CardView cardProfile;
     private CardView cardPresences;
     private CardView cardEvaluations;
     private CardView cardCours;
@@ -79,14 +80,19 @@ public class DashboardActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_dashboard_dashboard);
 
+        cardProfile = findViewById(R.id.card_profile);
         cardPresences = findViewById(R.id.card_presences);
         cardEvaluations = findViewById(R.id.card_evaluations);
         cardCours = findViewById(R.id.card_cours);
         cardAnnonces = findViewById(R.id.card_annonces);
 
+        cardProfile.setOnClickListener(v -> {
+//            Toast.makeText(this, "Carte Présences cliquée", Toast.LENGTH_SHORT).show();
+            startActivity(new Intent(DashboardActivity.this, com.itn.smartitn.ProfileActivity.class));
+        });
         cardPresences.setOnClickListener(v -> {
-            Toast.makeText(this, "Carte Présences cliquée", Toast.LENGTH_SHORT).show();
-//            startActivity(new Intent(this, .class));
+//            Toast.makeText(this, "Carte Présences cliquée", Toast.LENGTH_SHORT).show();
+            startActivity(new Intent(DashboardActivity.this, com.itn.smartitn.presence.MainActivity.class));
         });
         cardEvaluations.setOnClickListener(v -> {
 //            Toast.makeText(this, "Carte Présences cliquée", Toast.LENGTH_SHORT).show();

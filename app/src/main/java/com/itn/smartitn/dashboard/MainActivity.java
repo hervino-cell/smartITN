@@ -11,6 +11,8 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.itn.smartitn.R;
 
+import com.itn.smartitn.auth.utils.SessionManager;
+
 import com.google.gson.annotations.SerializedName;
 
 import java.util.List;
@@ -36,7 +38,6 @@ import retrofit2.http.Path;
 // =============================================================================
 
 public class MainActivity extends AppCompatActivity {
-
     private EditText    etMatricule;
     private Button      btnAcceder;
     private ProgressBar progressBar;
@@ -44,13 +45,24 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_dashboard_main);
+//        setContentView(R.layout.activity_dashboard_main);
+//
+//        etMatricule = findViewById(R.id.et_matricule);
+//        btnAcceder  = findViewById(R.id.btn_acceder);
+//        progressBar = findViewById(R.id.progress_bar);
+//
+//        btnAcceder.setOnClickListener(v -> validerEtNaviguer());
 
-        etMatricule = findViewById(R.id.et_matricule);
-        btnAcceder  = findViewById(R.id.btn_acceder);
-        progressBar = findViewById(R.id.progress_bar);
+        SessionManager sessionManager = new SessionManager(this);
 
-        btnAcceder.setOnClickListener(v -> validerEtNaviguer());
+        if (!sessionManager.isLoggedIn()) {
+            // Are you serious? by which means we got here without being logged in?
+            finish();
+        }
+
+        Intent intent = new Intent(this, DashboardActivity.class);
+        intent.putExtra(DashboardActivity.EXTRA_STUDENT_ID, sessionManager.getUser().getId());
+        startActivity(intent);
     }
 
     private void validerEtNaviguer() {
