@@ -99,7 +99,8 @@ public class DashboardActivity extends AppCompatActivity {
             startActivity(new Intent(DashboardActivity.this, com.itn.smartitn.evaluation.MainActivity.class));
         });
         cardCours.setOnClickListener(v -> {
-            Toast.makeText(this, "Carte Présences cliquée", Toast.LENGTH_SHORT).show();
+//            Toast.makeText(this, "Carte Présences cliquée", Toast.LENGTH_SHORT).show();
+            startActivity(new Intent(DashboardActivity.this, com.itn.smartitn.visualisation.MainActivity.class));
         });
         cardAnnonces.setOnClickListener(v -> {
 //            Toast.makeText(this, "Carte Présences cliquée", Toast.LENGTH_SHORT).show();

@@ -37,6 +37,8 @@
         <activity android:name=".events.DetailActivity" />
         <activity android:name=".presence.MainActivity" />
         <activity android:name=".presence.AttendanceActivity" />
+        <activity android:name=".visualisation.MainActivity" />
+        <activity android:name=".visualisation.NotesActivity" />
 
     </application>
 
