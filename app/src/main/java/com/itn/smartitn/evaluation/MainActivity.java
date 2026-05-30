@@ -9,6 +9,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -45,8 +47,23 @@ public class MainActivity extends AppCompatActivity {
         @SerializedName("cours")  public List<Course> cours;
     }
 
+    // Modèle pour evaluationRating/{course_id}
+    public static class EvaluationRatingResponse {
+        @SerializedName("status")      public boolean         status;
+        @SerializedName("evaluations") public List<EvalEntry> evaluations;
+
+        public static class EvalEntry {
+            @SerializedName("etudiant") public EtudiantInfo etudiant;
+
+            public static class EtudiantInfo {
+                @SerializedName("id") public String id;
+            }
+        }
+    }
+
+    // Garde pour compatibilité avec EvaluationActivity
     public static class EvaluatedResponse {
-        @SerializedName("status")      public boolean      status;
+        @SerializedName("status")      public boolean         status;
         @SerializedName("evaluations") public List<Evaluation> evaluations;
 
         public static class Evaluation {
@@ -59,6 +76,10 @@ public class MainActivity extends AppCompatActivity {
         @GET("API/courses")
         Call<CoursesResponse> getCourses();
 
+        @GET("API/evaluationRating/{course_id}")
+        Call<EvaluationRatingResponse> getEvaluationRating(@Path("course_id") int courseId);
+
+        // Gardé pour compatibilité (même si non fonctionnel côté serveur)
         @GET("API/evaluation/{student_id}")
         Call<EvaluatedResponse> getEvaluatedCourses(@Path("student_id") int studentId);
     }
@@ -70,9 +91,8 @@ public class MainActivity extends AppCompatActivity {
 
     public static final ApiService apiService = retrofit.create(ApiService.class);
 
-    // Interface pour le clic sur un cours
     public interface OnCourseClickListener {
-        void onCourseClick(Course course);
+        void onCourseClick(Course course, boolean alreadyEvaluated);
     }
 
     /* ─── Adapter RecyclerView Multi-Section ─── */
@@ -81,47 +101,49 @@ public class MainActivity extends AppCompatActivity {
         private static final int TYPE_ITEM   = 1;
 
         static class Item {
-            String title;
-            Course course;
+            String  title;
+            Course  course;
             boolean isHeader;
             boolean isEvaluated;
 
             Item(String title) { this.title = title; this.isHeader = true; }
-            Item(Course course, boolean evaluated) { 
-                this.course = course; 
-                this.isEvaluated = evaluated; 
-                this.isHeader = false; 
+            Item(Course course, boolean evaluated) {
+                this.course      = course;
+                this.isEvaluated = evaluated;
+                this.isHeader    = false;
             }
         }
 
-        private final List<Item> items = new ArrayList<>();
+        private final List<Item>            items = new ArrayList<>();
         private final OnCourseClickListener listener;
 
-        MultiSectionAdapter(List<Course> available, List<Course> evaluated, OnCourseClickListener listener) {
+        MultiSectionAdapter(List<Course> available, List<Course> evaluated,
+                            OnCourseClickListener listener) {
             this.listener = listener;
-            
-            // Section : Cours a evaluer
+
             items.add(new Item("Cours a evaluer"));
             for (Course c : available) items.add(new Item(c, false));
 
-            // Section : Cours evalues
-            items.add(new Item("Cours evalues"));
-            for (Course c : evaluated) items.add(new Item(c, true));
+            // Header "Cours evalues" affiché uniquement s'il y en a
+            if (!evaluated.isEmpty()) {
+                items.add(new Item("Cours evalues"));
+                for (Course c : evaluated) items.add(new Item(c, true));
+            }
         }
 
-        @Override
-        public int getItemViewType(int pos) {
+        @Override public int getItemViewType(int pos) {
             return items.get(pos).isHeader ? TYPE_HEADER : TYPE_ITEM;
         }
 
-        @NonNull
-        @Override
+        @NonNull @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             if (viewType == TYPE_HEADER) {
-                View v = LayoutInflater.from(parent.getContext()).inflate(android.R.layout.simple_list_item_1, parent, false);
+                View v = LayoutInflater.from(parent.getContext())
+                        .inflate(android.R.layout.simple_list_item_1, parent, false);
                 return new HeaderVH(v);
             }
-            View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.evaluation_item_course, parent, false);
+            View v = LayoutInflater.from(parent.getContext())
+                    .inflate(R.layout.evaluation_item_course, parent, false);
             return new ItemVH(v);
         }
 
@@ -139,18 +161,19 @@ public class MainActivity extends AppCompatActivity {
                 ItemVH h = (ItemVH) holder;
                 h.tvNom.setText(item.course.nomCours);
                 h.tvCode.setText(item.course.codeCours);
-                
+
                 if (item.isEvaluated) {
                     h.tvStatus.setText("✓ Évaluation terminée");
                     h.tvStatus.setTextColor(0xFF4CAF50);
                     h.itemView.setAlpha(0.6f);
-                    h.itemView.setOnClickListener(v -> 
-                        Toast.makeText(v.getContext(), "Ce cours est deja evalue", Toast.LENGTH_SHORT).show());
+                    h.itemView.setOnClickListener(v ->
+                            listener.onCourseClick(item.course, true));
                 } else {
                     h.tvStatus.setText("Évaluer ce cours");
                     h.tvStatus.setTextColor(0xFF3F51B5);
                     h.itemView.setAlpha(1.0f);
-                    h.itemView.setOnClickListener(v -> listener.onCourseClick(item.course));
+                    h.itemView.setOnClickListener(v ->
+                            listener.onCourseClick(item.course, false));
                 }
             }
         }
@@ -174,15 +197,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private RecyclerView recyclerView;
-    private int studentId;
+    private int          studentId;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_evaluation_main);
 
-        SessionManager sm = new SessionManager(this);
-        Etudiant user = sm.getUser();
+        SessionManager sm   = new SessionManager(this);
+        Etudiant       user = sm.getUser();
         if (user == null) { finish(); return; }
         studentId = user.getId();
 
@@ -199,53 +222,92 @@ public class MainActivity extends AppCompatActivity {
     private void loadData() {
         apiService.getCourses().enqueue(new Callback<CoursesResponse>() {
             @Override
-            public void onResponse(@NonNull Call<CoursesResponse> call, @NonNull Response<CoursesResponse> r1) {
-                if (r1.isSuccessful() && r1.body() != null) {
-                    fetchEvaluatedAndSplit(r1.body().cours);
+            public void onResponse(@NonNull Call<CoursesResponse> call,
+                                   @NonNull Response<CoursesResponse> r1) {
+                if (r1.isSuccessful() && r1.body() != null && r1.body().cours != null) {
+                    checkEachCourseForStudent(r1.body().cours);
                 }
             }
-            @Override public void onFailure(@NonNull Call<CoursesResponse> call, @NonNull Throwable t) {
+            @Override public void onFailure(@NonNull Call<CoursesResponse> call,
+                                            @NonNull Throwable t) {
                 Toast.makeText(MainActivity.this, "Erreur réseau", Toast.LENGTH_SHORT).show();
             }
         });
     }
 
-    private void fetchEvaluatedAndSplit(List<Course> allCourses) {
-        apiService.getEvaluatedCourses(studentId).enqueue(new Callback<EvaluatedResponse>() {
-            @Override
-            public void onResponse(@NonNull Call<EvaluatedResponse> call, @NonNull Response<EvaluatedResponse> r2) {
-                Set<Integer> evaluatedIds = new HashSet<>();
-                if (r2.isSuccessful() && r2.body() != null && r2.body().evaluations != null) {
-                    for (EvaluatedResponse.Evaluation e : r2.body().evaluations) {
-                        evaluatedIds.add(e.coursId);
+    /**
+     * Pour chaque cours, appelle evaluationRating/{course_id} et vérifie
+     * si studentId figure dans la liste des évaluations.
+     * Une fois tous les appels terminés, construit la liste avec deux sections.
+     */
+    private void checkEachCourseForStudent(List<Course> allCourses) {
+        String myId = String.valueOf(studentId);
+        List<Course> available = new ArrayList<>();
+        List<Course> evaluated = new ArrayList<>();
+
+        int total = allCourses.size();
+        AtomicInteger done = new AtomicInteger(0);
+
+        for (Course course : allCourses) {
+            apiService.getEvaluationRating(course.id)
+                    .enqueue(new Callback<EvaluationRatingResponse>() {
+                        @Override
+                        public void onResponse(@NonNull Call<EvaluationRatingResponse> call,
+                                               @NonNull Response<EvaluationRatingResponse> r) {
+                            boolean found = false;
+                            if (r.isSuccessful() && r.body() != null
+                                    && r.body().evaluations != null) {
+                                for (EvaluationRatingResponse.EvalEntry entry
+                                        : r.body().evaluations) {
+                                    if (entry.etudiant != null
+                                            && myId.equals(entry.etudiant.id)) {
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            synchronized (available) {
+                                if (found) evaluated.add(course);
+                                else       available.add(course);
+                            }
+
+                            if (done.incrementAndGet() == total) {
+                                runOnUiThread(() -> buildAdapter(available, evaluated));
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(@NonNull Call<EvaluationRatingResponse> call,
+                                              @NonNull Throwable t) {
+                            synchronized (available) {
+                                available.add(course);
+                            }
+                            if (done.incrementAndGet() == total) {
+                                runOnUiThread(() -> buildAdapter(available, evaluated));
+                            }
+                        }
+                    });
+        }
+    }
+
+    private void buildAdapter(List<Course> available, List<Course> evaluated) {
+        recyclerView.setAdapter(new MultiSectionAdapter(available, evaluated,
+                (course, alreadyEvaluated) -> {
+                    if (alreadyEvaluated) {
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setTitle("Cours déjà évalué")
+                                .setMessage("Vous avez déjà soumis une évaluation pour ce cours.\nUne seule évaluation par cours est autorisée.")
+                                .setIcon(android.R.drawable.ic_dialog_info)
+                                .setCancelable(true)
+                                .setPositiveButton("OK", (dialog, which) -> dialog.dismiss())
+                                .show();
+                    } else {
+                        Intent i = new Intent(MainActivity.this, EvaluationActivity.class);
+                        i.putExtra("course_id",   course.id);
+                        i.putExtra("course_name", course.nomCours);
+                        startActivity(i);
                     }
-                }
-
-                List<Course> available = new ArrayList<>();
-                List<Course> evaluated = new ArrayList<>();
-
-                for (Course c : allCourses) {
-                    if (evaluatedIds.contains(c.id)) evaluated.add(c);
-                    else available.add(c);
-                }
-
-                recyclerView.setAdapter(new MultiSectionAdapter(available, evaluated, course -> {
-                    Intent i = new Intent(MainActivity.this, EvaluationActivity.class);
-                    i.putExtra("course_id", course.id);
-                    i.putExtra("course_name", course.nomCours);
-                    startActivity(i);
                 }));
-            }
-
-            @Override public void onFailure(@NonNull Call<EvaluatedResponse> call, @NonNull Throwable t) {
-                // En cas d'échec de la récupération des évaluations, on considère tout comme disponible
-                recyclerView.setAdapter(new MultiSectionAdapter(allCourses, new ArrayList<>(), course -> {
-                    Intent i = new Intent(MainActivity.this, EvaluationActivity.class);
-                    i.putExtra("course_id", course.id);
-                    i.putExtra("course_name", course.nomCours);
-                    startActivity(i);
-                }));
-            }
-        });
     }
 }

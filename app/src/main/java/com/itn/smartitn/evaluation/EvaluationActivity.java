@@ -8,6 +8,7 @@ import android.widget.RatingBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.gson.annotations.SerializedName;
@@ -42,10 +43,18 @@ public class EvaluationActivity extends AppCompatActivity {
         @SerializedName("criteres") public List<Critere> criteres;
     }
 
-    public static class RatingResponse {
-        @SerializedName("status") public boolean status;
-        @SerializedName("rating") public float   rating;
-        @SerializedName("count")  public int     count;
+    // Modèle pour parser evaluationRating/{course_id}
+    public static class EvaluationRatingResponse {
+        @SerializedName("status")      public boolean           status;
+        @SerializedName("evaluations") public List<EvalEntry>   evaluations;
+
+        public static class EvalEntry {
+            @SerializedName("etudiant") public Etudiant etudiant;
+
+            public static class Etudiant {
+                @SerializedName("id") public String id; // retourné comme String dans le JSON
+            }
+        }
     }
 
     static class CritereNote {
@@ -78,12 +87,12 @@ public class EvaluationActivity extends AppCompatActivity {
         @GET("API/criteres")
         Call<CriteresResponse> getCriteres();
 
+        @GET("API/evaluationRating/{course_id}")
+        Call<EvaluationRatingResponse> getEvaluationRating(@Path("course_id") int courseId);
+
         @POST("API/evaluation/{student_id}")
         Call<EvalResponse> submit(@Path("student_id") int studentId,
                                   @Body EvalRequest body);
-
-        @GET("API/evaluationRating/{id_cours}")
-        Call<RatingResponse> getRating(@Path("id_cours") int idCours);
     }
 
     private int            courseId;
@@ -91,6 +100,7 @@ public class EvaluationActivity extends AppCompatActivity {
     private final List<Critere>   criteres   = new ArrayList<>();
     private final List<RatingBar> ratingBars = new ArrayList<>();
     private LinearLayout criteresContainer;
+    private Button       btnSubmit;
     private EvalApi      evalApi;
 
     @Override
@@ -98,7 +108,6 @@ public class EvaluationActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_evaluation_evaluation);
 
-        // Récupération de l'ID étudiant depuis la session
         SessionManager sessionManager = new SessionManager(this);
         Etudiant user = sessionManager.getUser();
         if (user != null) {
@@ -116,30 +125,84 @@ public class EvaluationActivity extends AppCompatActivity {
         tvTitle.setText("Évaluer : " + courseName);
 
         criteresContainer = findViewById(R.id.criteres_container);
-        Button btnSubmit  = findViewById(R.id.btn_submit);
+        btnSubmit         = findViewById(R.id.btn_submit);
+
+        // Bouton désactivé jusqu'à confirmation
+        btnSubmit.setEnabled(false);
+        btnSubmit.setAlpha(0.4f);
 
         evalApi = MainActivity.retrofit.create(EvalApi.class);
 
-        loadCriteres();
-        checkCurrentRating();
-        
-        btnSubmit.setOnClickListener(v -> submitEvaluation());
+        // 1. Vérifier si déjà évalué via evaluationRating/{course_id}
+        checkIfAlreadyEvaluated();
     }
 
-    private void checkCurrentRating() {
-        evalApi.getRating(courseId).enqueue(new Callback<RatingResponse>() {
-            @Override
-            public void onResponse(Call<RatingResponse> call, Response<RatingResponse> response) {
-                if (response.isSuccessful() && response.body() != null && response.body().status) {
-                    float rating = response.body().rating;
-                    int count = response.body().count;
-                    Toast.makeText(EvaluationActivity.this, 
-                        String.format(Locale.getDefault(), "Note actuelle: %.1f/5 (%d évaluations)", rating, count), 
-                        Toast.LENGTH_SHORT).show();
-                }
-            }
-            @Override public void onFailure(Call<RatingResponse> call, Throwable t) {}
-        });
+    /**
+     * Appelle GET /API/evaluationRating/{course_id} et parcourt la liste
+     * des évaluations pour voir si studentId y figure déjà.
+     */
+    private void checkIfAlreadyEvaluated() {
+        evalApi.getEvaluationRating(courseId)
+                .enqueue(new Callback<EvaluationRatingResponse>() {
+                    @Override
+                    public void onResponse(Call<EvaluationRatingResponse> call,
+                                           Response<EvaluationRatingResponse> response) {
+                        boolean dejaEvalue = false;
+
+                        if (response.isSuccessful()
+                                && response.body() != null
+                                && response.body().evaluations != null) {
+
+                            String myId = String.valueOf(studentId);
+
+                            for (EvaluationRatingResponse.EvalEntry entry
+                                    : response.body().evaluations) {
+                                if (entry.etudiant != null
+                                        && myId.equals(entry.etudiant.id)) {
+                                    dejaEvalue = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (dejaEvalue) {
+                            showAlreadyEvaluatedDialog();
+                        } else {
+                            // Pas encore évalué : charger le formulaire
+                            loadCriteres();
+                            btnSubmit.setEnabled(true);
+                            btnSubmit.setAlpha(1.0f);
+                            btnSubmit.setOnClickListener(v -> submitEvaluation());
+                        }
+                    }
+
+                    @Override
+                    public void onFailure(Call<EvaluationRatingResponse> call, Throwable t) {
+                        // Réseau indisponible : on laisse accéder
+                        loadCriteres();
+                        btnSubmit.setEnabled(true);
+                        btnSubmit.setAlpha(1.0f);
+                        btnSubmit.setOnClickListener(v -> submitEvaluation());
+                    }
+                });
+    }
+
+    /**
+     * Dialog non annulable — clic OK renvoie à la liste des cours.
+     */
+    private void showAlreadyEvaluatedDialog() {
+        if (isFinishing() || isDestroyed()) return;
+
+        new AlertDialog.Builder(this)
+                .setTitle("Cours déjà évalué")
+                .setMessage("Vous avez déjà soumis une évaluation pour ce cours.\nUne seule évaluation par cours est autorisée.")
+                .setIcon(android.R.drawable.ic_dialog_info)
+                .setCancelable(false)
+                .setPositiveButton("OK", (dialog, which) -> {
+                    dialog.dismiss();
+                    finish();
+                })
+                .show();
     }
 
     private void loadCriteres() {
@@ -171,18 +234,17 @@ public class EvaluationActivity extends AppCompatActivity {
             tv.setPadding(0, 16 * dp, 0, 4 * dp);
             criteresContainer.addView(tv);
 
-            // Création du RatingBar avec style par défaut pour assurer l'interactivité
             RatingBar rb = new RatingBar(this, null, android.R.attr.ratingBarStyle);
-            rb.setNumStars(5); // Fixé à 5 étoiles
+            rb.setNumStars(5);
             rb.setStepSize(1.0f);
             rb.setRating(3f);
-            
+
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT);
             params.bottomMargin = 8 * dp;
             rb.setLayoutParams(params);
-            
+
             criteresContainer.addView(rb);
             ratingBars.add(rb);
         }
