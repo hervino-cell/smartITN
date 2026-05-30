@@ -1,6 +1,7 @@
 package com.itn.smartitn.evaluation;
 
 import android.os.Bundle;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.RatingBar;
@@ -10,8 +11,9 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.gson.annotations.SerializedName;
-
 import com.itn.smartitn.R;
+import com.itn.smartitn.auth.models.Etudiant;
+import com.itn.smartitn.auth.utils.SessionManager;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -38,6 +40,12 @@ public class EvaluationActivity extends AppCompatActivity {
     public static class CriteresResponse {
         @SerializedName("status")   public boolean       status;
         @SerializedName("criteres") public List<Critere> criteres;
+    }
+
+    public static class RatingResponse {
+        @SerializedName("status") public boolean status;
+        @SerializedName("rating") public float   rating;
+        @SerializedName("count")  public int     count;
     }
 
     static class CritereNote {
@@ -73,12 +81,13 @@ public class EvaluationActivity extends AppCompatActivity {
         @POST("API/evaluation/{student_id}")
         Call<EvalResponse> submit(@Path("student_id") int studentId,
                                   @Body EvalRequest body);
+
+        @GET("API/evaluationRating/{id_cours}")
+        Call<RatingResponse> getRating(@Path("id_cours") int idCours);
     }
 
-    /* ─── ID étudiant connecté (à remplacer par SharedPreferences) ─── */
-    private static final int STUDENT_ID = 1;
-
     private int            courseId;
+    private int            studentId;
     private final List<Critere>   criteres   = new ArrayList<>();
     private final List<RatingBar> ratingBars = new ArrayList<>();
     private LinearLayout criteresContainer;
@@ -88,6 +97,17 @@ public class EvaluationActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_evaluation_evaluation);
+
+        // Récupération de l'ID étudiant depuis la session
+        SessionManager sessionManager = new SessionManager(this);
+        Etudiant user = sessionManager.getUser();
+        if (user != null) {
+            studentId = user.getId();
+        } else {
+            Toast.makeText(this, "Veuillez vous connecter", Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
 
         courseId = getIntent().getIntExtra("course_id", 1);
         String courseName = getIntent().getStringExtra("course_name");
@@ -101,29 +121,40 @@ public class EvaluationActivity extends AppCompatActivity {
         evalApi = MainActivity.retrofit.create(EvalApi.class);
 
         loadCriteres();
+        checkCurrentRating();
+        
         btnSubmit.setOnClickListener(v -> submitEvaluation());
+    }
+
+    private void checkCurrentRating() {
+        evalApi.getRating(courseId).enqueue(new Callback<RatingResponse>() {
+            @Override
+            public void onResponse(Call<RatingResponse> call, Response<RatingResponse> response) {
+                if (response.isSuccessful() && response.body() != null && response.body().status) {
+                    float rating = response.body().rating;
+                    int count = response.body().count;
+                    Toast.makeText(EvaluationActivity.this, 
+                        String.format(Locale.getDefault(), "Note actuelle: %.1f/5 (%d évaluations)", rating, count), 
+                        Toast.LENGTH_SHORT).show();
+                }
+            }
+            @Override public void onFailure(Call<RatingResponse> call, Throwable t) {}
+        });
     }
 
     private void loadCriteres() {
         evalApi.getCriteres().enqueue(new Callback<CriteresResponse>() {
             @Override
-            public void onResponse(Call<CriteresResponse> call,
-                                   Response<CriteresResponse> r) {
+            public void onResponse(Call<CriteresResponse> call, Response<CriteresResponse> r) {
                 if (r.isSuccessful() && r.body() != null && r.body().status) {
                     criteres.addAll(r.body().criteres);
                     buildUI();
                 } else {
-                    Toast.makeText(EvaluationActivity.this,
-                            R.string.erreur_chargement,
-                            Toast.LENGTH_SHORT).show();
+                    Toast.makeText(EvaluationActivity.this, R.string.erreur_chargement, Toast.LENGTH_SHORT).show();
                 }
             }
-
-            @Override
-            public void onFailure(Call<CriteresResponse> call, Throwable t) {
-                Toast.makeText(EvaluationActivity.this,
-                        "Réseau : " + t.getMessage(),
-                        Toast.LENGTH_SHORT).show();
+            @Override public void onFailure(Call<CriteresResponse> call, Throwable t) {
+                Toast.makeText(EvaluationActivity.this, "Réseau : " + t.getMessage(), Toast.LENGTH_SHORT).show();
             }
         });
     }
@@ -140,10 +171,18 @@ public class EvaluationActivity extends AppCompatActivity {
             tv.setPadding(0, 16 * dp, 0, 4 * dp);
             criteresContainer.addView(tv);
 
-            RatingBar rb = new RatingBar(this);
-            rb.setNumStars(5);
+            // Création du RatingBar avec style par défaut pour assurer l'interactivité
+            RatingBar rb = new RatingBar(this, null, android.R.attr.ratingBarStyle);
+            rb.setNumStars(5); // Fixé à 5 étoiles
             rb.setStepSize(1.0f);
             rb.setRating(3f);
+            
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            params.bottomMargin = 8 * dp;
+            rb.setLayoutParams(params);
+            
             criteresContainer.addView(rb);
             ratingBars.add(rb);
         }
@@ -151,43 +190,30 @@ public class EvaluationActivity extends AppCompatActivity {
 
     private void submitEvaluation() {
         if (ratingBars.isEmpty()) {
-            Toast.makeText(this,
-                    "Critères non encore chargés",
-                    Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Critères non encore chargés", Toast.LENGTH_SHORT).show();
             return;
         }
 
         List<CritereNote> notes = new ArrayList<>();
         for (int i = 0; i < criteres.size(); i++) {
-            notes.add(new CritereNote(
-                    criteres.get(i).id,
-                    (int) ratingBars.get(i).getRating()));
+            notes.add(new CritereNote(criteres.get(i).id, (int) ratingBars.get(i).getRating()));
         }
 
         Calendar cal = Calendar.getInstance();
         String date = String.format(Locale.getDefault(), "%04d-%02d-%02d",
-                cal.get(Calendar.YEAR),
-                cal.get(Calendar.MONTH) + 1,
-                cal.get(Calendar.DAY_OF_MONTH));
+                cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH));
 
-        evalApi.submit(STUDENT_ID, new EvalRequest(courseId, date, notes))
+        evalApi.submit(studentId, new EvalRequest(courseId, date, notes))
                 .enqueue(new Callback<EvalResponse>() {
                     @Override
-                    public void onResponse(Call<EvalResponse> call,
-                                           Response<EvalResponse> r) {
+                    public void onResponse(Call<EvalResponse> call, Response<EvalResponse> r) {
                         if (r.isSuccessful() && r.body() != null) {
-                            Toast.makeText(EvaluationActivity.this,
-                                    r.body().message,
-                                    Toast.LENGTH_LONG).show();
+                            Toast.makeText(EvaluationActivity.this, r.body().message, Toast.LENGTH_LONG).show();
                             if (r.body().status) finish();
                         }
                     }
-
-                    @Override
-                    public void onFailure(Call<EvalResponse> call, Throwable t) {
-                        Toast.makeText(EvaluationActivity.this,
-                                "Réseau : " + t.getMessage(),
-                                Toast.LENGTH_SHORT).show();
+                    @Override public void onFailure(Call<EvalResponse> call, Throwable t) {
+                        Toast.makeText(EvaluationActivity.this, "Réseau : " + t.getMessage(), Toast.LENGTH_SHORT).show();
                     }
                 });
     }
